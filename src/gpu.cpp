@@ -16,8 +16,8 @@
 
 #if NCNN_VULKAN
 
+#include <stdlib.h>
 #include <string.h>
-#include <vulkan/vulkan.h>
 
 #include "glslang/SPIRV/GlslangToSpv.h"
 #if NCNN_SYSTEM_GLSLANG
@@ -26,7 +26,7 @@
 #include "glslang/glslang/Public/ShaderLang.h"
 #endif
 
-#include "vulkan_activation.comp.hex.h"
+#include "layer/vulkan/shader/vulkan_activation.comp.hex.h"
 
 #include "command.h"
 #include "layer.h"
@@ -50,6 +50,16 @@ public:
     __ncnn_vulkan_instance_holder()
     {
         instance = 0;
+        created = 0;
+        glslang_initialized = false;
+
+#if NCNN_VULKAN_LOADER
+        libvulkan = 0;
+#if defined __ANDROID__
+        hvkdi = 0;
+#endif
+#endif // NCNN_VULKAN_LOADER
+
 #if ENABLE_VALIDATION_LAYER
         callback = 0;
 #endif
@@ -66,6 +76,9 @@ public:
     }
 
     VkInstance instance;
+    int created;
+    bool glslang_initialized;
+
 #if ENABLE_VALIDATION_LAYER
     VkDebugUtilsMessengerEXT callback;
 #endif
@@ -97,6 +110,103 @@ static const layer_shader_registry_entry layer_shader_registry[] = {
 
 static const int layer_shader_registry_entry_count = sizeof(layer_shader_registry) / sizeof(layer_shader_registry_entry);
 
+// vulkan core
+PFN_vkAllocateCommandBuffers vkAllocateCommandBuffers = 0;
+PFN_vkAllocateDescriptorSets vkAllocateDescriptorSets = 0;
+PFN_vkAllocateMemory vkAllocateMemory = 0;
+PFN_vkBeginCommandBuffer vkBeginCommandBuffer = 0;
+PFN_vkBindBufferMemory vkBindBufferMemory = 0;
+PFN_vkBindImageMemory vkBindImageMemory = 0;
+PFN_vkCmdBeginQuery vkCmdBeginQuery = 0;
+PFN_vkCmdBindDescriptorSets vkCmdBindDescriptorSets = 0;
+PFN_vkCmdBindIndexBuffer vkCmdBindIndexBuffer = 0;
+PFN_vkCmdBindPipeline vkCmdBindPipeline = 0;
+PFN_vkCmdCopyBuffer vkCmdCopyBuffer = 0;
+PFN_vkCmdCopyBufferToImage vkCmdCopyBufferToImage = 0;
+PFN_vkCmdCopyImage vkCmdCopyImage = 0;
+PFN_vkCmdCopyImageToBuffer vkCmdCopyImageToBuffer = 0;
+PFN_vkCmdCopyQueryPoolResults vkCmdCopyQueryPoolResults = 0;
+PFN_vkCmdDispatch vkCmdDispatch = 0;
+PFN_vkCmdDispatchIndirect vkCmdDispatchIndirect = 0;
+PFN_vkCmdEndQuery vkCmdEndQuery = 0;
+PFN_vkCmdExecuteCommands vkCmdExecuteCommands = 0;
+PFN_vkCmdFillBuffer vkCmdFillBuffer = 0;
+PFN_vkCmdPipelineBarrier vkCmdPipelineBarrier = 0;
+PFN_vkCmdPushConstants vkCmdPushConstants = 0;
+PFN_vkCmdResetQueryPool vkCmdResetQueryPool = 0;
+PFN_vkCmdResolveImage vkCmdResolveImage = 0;
+PFN_vkCmdUpdateBuffer vkCmdUpdateBuffer = 0;
+PFN_vkCmdWriteTimestamp vkCmdWriteTimestamp = 0;
+PFN_vkCreateBuffer vkCreateBuffer = 0;
+PFN_vkCreateBufferView vkCreateBufferView = 0;
+PFN_vkCreateCommandPool vkCreateCommandPool = 0;
+PFN_vkCreateComputePipelines vkCreateComputePipelines = 0;
+PFN_vkCreateDescriptorPool vkCreateDescriptorPool = 0;
+PFN_vkCreateDescriptorSetLayout vkCreateDescriptorSetLayout = 0;
+PFN_vkCreateDevice vkCreateDevice = 0;
+PFN_vkCreateFence vkCreateFence = 0;
+PFN_vkCreateImage vkCreateImage = 0;
+PFN_vkCreateImageView vkCreateImageView = 0;
+PFN_vkCreatePipelineCache vkCreatePipelineCache = 0;
+PFN_vkCreatePipelineLayout vkCreatePipelineLayout = 0;
+PFN_vkCreateQueryPool vkCreateQueryPool = 0;
+PFN_vkCreateSampler vkCreateSampler = 0;
+PFN_vkCreateSemaphore vkCreateSemaphore = 0;
+PFN_vkCreateShaderModule vkCreateShaderModule = 0;
+PFN_vkDestroyBuffer vkDestroyBuffer = 0;
+PFN_vkDestroyBufferView vkDestroyBufferView = 0;
+PFN_vkDestroyCommandPool vkDestroyCommandPool = 0;
+PFN_vkDestroyDescriptorPool vkDestroyDescriptorPool = 0;
+PFN_vkDestroyDescriptorSetLayout vkDestroyDescriptorSetLayout = 0;
+PFN_vkDestroyDevice vkDestroyDevice = 0;
+PFN_vkDestroyFence vkDestroyFence = 0;
+PFN_vkDestroyImage vkDestroyImage = 0;
+PFN_vkDestroyImageView vkDestroyImageView = 0;
+PFN_vkDestroyInstance vkDestroyInstance = 0;
+PFN_vkDestroyPipeline vkDestroyPipeline = 0;
+PFN_vkDestroyPipelineCache vkDestroyPipelineCache = 0;
+PFN_vkDestroyPipelineLayout vkDestroyPipelineLayout = 0;
+PFN_vkDestroyQueryPool vkDestroyQueryPool = 0;
+PFN_vkDestroySampler vkDestroySampler = 0;
+PFN_vkDestroySemaphore vkDestroySemaphore = 0;
+PFN_vkDestroyShaderModule vkDestroyShaderModule = 0;
+PFN_vkDeviceWaitIdle vkDeviceWaitIdle = 0;
+PFN_vkEndCommandBuffer vkEndCommandBuffer = 0;
+PFN_vkEnumerateDeviceExtensionProperties vkEnumerateDeviceExtensionProperties = 0;
+PFN_vkEnumerateDeviceLayerProperties vkEnumerateDeviceLayerProperties = 0;
+PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices = 0;
+PFN_vkFlushMappedMemoryRanges vkFlushMappedMemoryRanges = 0;
+PFN_vkFreeCommandBuffers vkFreeCommandBuffers = 0;
+PFN_vkFreeDescriptorSets vkFreeDescriptorSets = 0;
+PFN_vkFreeMemory vkFreeMemory = 0;
+PFN_vkGetBufferMemoryRequirements vkGetBufferMemoryRequirements = 0;
+PFN_vkGetDeviceMemoryCommitment vkGetDeviceMemoryCommitment = 0;
+PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr = 0;
+PFN_vkGetDeviceQueue vkGetDeviceQueue = 0;
+PFN_vkGetFenceStatus vkGetFenceStatus = 0;
+PFN_vkGetImageMemoryRequirements vkGetImageMemoryRequirements = 0;
+PFN_vkGetImageSubresourceLayout vkGetImageSubresourceLayout = 0;
+PFN_vkGetPhysicalDeviceFeatures vkGetPhysicalDeviceFeatures = 0;
+PFN_vkGetPhysicalDeviceFormatProperties vkGetPhysicalDeviceFormatProperties = 0;
+PFN_vkGetPhysicalDeviceImageFormatProperties vkGetPhysicalDeviceImageFormatProperties = 0;
+PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties = 0;
+PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties = 0;
+PFN_vkGetPhysicalDeviceQueueFamilyProperties vkGetPhysicalDeviceQueueFamilyProperties = 0;
+PFN_vkGetPipelineCacheData vkGetPipelineCacheData = 0;
+PFN_vkGetQueryPoolResults vkGetQueryPoolResults = 0;
+PFN_vkInvalidateMappedMemoryRanges vkInvalidateMappedMemoryRanges = 0;
+PFN_vkMapMemory vkMapMemory = 0;
+PFN_vkMergePipelineCaches vkMergePipelineCaches = 0;
+PFN_vkQueueSubmit vkQueueSubmit = 0;
+PFN_vkQueueWaitIdle vkQueueWaitIdle = 0;
+PFN_vkResetCommandBuffer vkResetCommandBuffer = 0;
+PFN_vkResetCommandPool vkResetCommandPool = 0;
+PFN_vkResetDescriptorPool vkResetDescriptorPool = 0;
+PFN_vkResetFences vkResetFences = 0;
+PFN_vkUnmapMemory vkUnmapMemory = 0;
+PFN_vkUpdateDescriptorSets vkUpdateDescriptorSets = 0;
+PFN_vkWaitForFences vkWaitForFences = 0;
+
 int support_VK_KHR_external_memory_capabilities = 0;
 int support_VK_KHR_get_physical_device_properties2 = 0;
 int support_VK_KHR_get_surface_capabilities2 = 0;
@@ -122,7 +232,6 @@ PFN_vkGetPhysicalDeviceFormatProperties2KHR vkGetPhysicalDeviceFormatProperties2
 PFN_vkGetPhysicalDeviceImageFormatProperties2KHR vkGetPhysicalDeviceImageFormatProperties2KHR = 0;
 PFN_vkGetPhysicalDeviceQueueFamilyProperties2KHR vkGetPhysicalDeviceQueueFamilyProperties2KHR = 0;
 PFN_vkGetPhysicalDeviceMemoryProperties2KHR vkGetPhysicalDeviceMemoryProperties2KHR = 0;
-PFN_vkGetPhysicalDeviceSparseImageFormatProperties2KHR vkGetPhysicalDeviceSparseImageFormatProperties2KHR = 0;
 
 // VK_KHR_get_surface_capabilities2
 PFN_vkGetPhysicalDeviceSurfaceCapabilities2KHR vkGetPhysicalDeviceSurfaceCapabilities2KHR = 0;
@@ -159,6 +268,10 @@ public:
     uint32_t device_id;
     char device_name[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
     uint8_t pipeline_cache_uuid[VK_UUID_SIZE];
+
+    // driver properties
+    uint32_t driver_id;
+    char driver_name[VK_MAX_DRIVER_NAME_SIZE];
 
     // 0 = discrete gpu
     // 1 = integrated gpu
@@ -214,9 +327,11 @@ public:
     // fp16 and int8 feature
     bool support_fp16_packed;
     bool support_fp16_storage;
+    bool support_fp16_uniform;
     bool support_fp16_arithmetic;
     bool support_int8_packed;
     bool support_int8_storage;
+    bool support_int8_uniform;
     bool support_int8_arithmetic;
 
     // ycbcr conversion feature
@@ -224,6 +339,7 @@ public:
 
     // cooperative matrix
     bool support_cooperative_matrix;
+    bool support_cooperative_matrix_8_8_16;
     bool support_cooperative_matrix_16_8_8;
     bool support_cooperative_matrix_16_8_16;
     bool support_cooperative_matrix_16_16_16;
@@ -237,6 +353,7 @@ public:
     int support_VK_KHR_cooperative_matrix;
     int support_VK_KHR_dedicated_allocation;
     int support_VK_KHR_descriptor_update_template;
+    int support_VK_KHR_driver_properties;
     int support_VK_KHR_external_memory;
     int support_VK_KHR_get_memory_requirements2;
     int support_VK_KHR_maintenance1;
@@ -320,6 +437,16 @@ const char* GpuInfo::device_name() const
 uint8_t* GpuInfo::pipeline_cache_uuid() const
 {
     return d->pipeline_cache_uuid;
+}
+
+uint32_t GpuInfo::driver_id() const
+{
+    return d->driver_id;
+}
+
+const char* GpuInfo::driver_name() const
+{
+    return d->driver_name;
 }
 
 int GpuInfo::type() const
@@ -497,6 +624,11 @@ bool GpuInfo::support_fp16_storage() const
     return d->support_fp16_storage;
 }
 
+bool GpuInfo::support_fp16_uniform() const
+{
+    return d->support_fp16_uniform;
+}
+
 bool GpuInfo::support_fp16_arithmetic() const
 {
     return d->support_fp16_arithmetic;
@@ -512,6 +644,11 @@ bool GpuInfo::support_int8_storage() const
     return d->support_int8_storage;
 }
 
+bool GpuInfo::support_int8_uniform() const
+{
+    return d->support_int8_uniform;
+}
+
 bool GpuInfo::support_int8_arithmetic() const
 {
     return d->support_int8_arithmetic;
@@ -525,6 +662,11 @@ bool GpuInfo::support_ycbcr_conversion() const
 bool GpuInfo::support_cooperative_matrix() const
 {
     return d->support_cooperative_matrix;
+}
+
+bool GpuInfo::support_cooperative_matrix_8_8_16() const
+{
+    return d->support_cooperative_matrix_8_8_16;
 }
 
 bool GpuInfo::support_cooperative_matrix_16_8_8() const
@@ -580,6 +722,11 @@ int GpuInfo::support_VK_KHR_dedicated_allocation() const
 int GpuInfo::support_VK_KHR_descriptor_update_template() const
 {
     return d->support_VK_KHR_descriptor_update_template;
+}
+
+int GpuInfo::support_VK_KHR_driver_properties() const
+{
+    return d->support_VK_KHR_driver_properties;
 }
 
 int GpuInfo::support_VK_KHR_external_memory() const
@@ -689,6 +836,107 @@ int GpuInfo::support_VK_NV_cooperative_matrix() const
     return d->support_VK_NV_cooperative_matrix;
 }
 
+static int init_instance_core()
+{
+    vkAllocateCommandBuffers = (PFN_vkAllocateCommandBuffers)vkGetInstanceProcAddr(g_instance, "vkAllocateCommandBuffers");
+    vkAllocateDescriptorSets = (PFN_vkAllocateDescriptorSets)vkGetInstanceProcAddr(g_instance, "vkAllocateDescriptorSets");
+    vkAllocateMemory = (PFN_vkAllocateMemory)vkGetInstanceProcAddr(g_instance, "vkAllocateMemory");
+    vkBeginCommandBuffer = (PFN_vkBeginCommandBuffer)vkGetInstanceProcAddr(g_instance, "vkBeginCommandBuffer");
+    vkBindBufferMemory = (PFN_vkBindBufferMemory)vkGetInstanceProcAddr(g_instance, "vkBindBufferMemory");
+    vkBindImageMemory = (PFN_vkBindImageMemory)vkGetInstanceProcAddr(g_instance, "vkBindImageMemory");
+    vkCmdBeginQuery = (PFN_vkCmdBeginQuery)vkGetInstanceProcAddr(g_instance, "vkCmdBeginQuery");
+    vkCmdBindDescriptorSets = (PFN_vkCmdBindDescriptorSets)vkGetInstanceProcAddr(g_instance, "vkCmdBindDescriptorSets");
+    vkCmdBindIndexBuffer = (PFN_vkCmdBindIndexBuffer)vkGetInstanceProcAddr(g_instance, "vkCmdBindIndexBuffer");
+    vkCmdBindPipeline = (PFN_vkCmdBindPipeline)vkGetInstanceProcAddr(g_instance, "vkCmdBindPipeline");
+    vkCmdCopyBuffer = (PFN_vkCmdCopyBuffer)vkGetInstanceProcAddr(g_instance, "vkCmdCopyBuffer");
+    vkCmdCopyBufferToImage = (PFN_vkCmdCopyBufferToImage)vkGetInstanceProcAddr(g_instance, "vkCmdCopyBufferToImage");
+    vkCmdCopyImage = (PFN_vkCmdCopyImage)vkGetInstanceProcAddr(g_instance, "vkCmdCopyImage");
+    vkCmdCopyImageToBuffer = (PFN_vkCmdCopyImageToBuffer)vkGetInstanceProcAddr(g_instance, "vkCmdCopyImageToBuffer");
+    vkCmdCopyQueryPoolResults = (PFN_vkCmdCopyQueryPoolResults)vkGetInstanceProcAddr(g_instance, "vkCmdCopyQueryPoolResults");
+    vkCmdDispatch = (PFN_vkCmdDispatch)vkGetInstanceProcAddr(g_instance, "vkCmdDispatch");
+    vkCmdDispatchIndirect = (PFN_vkCmdDispatchIndirect)vkGetInstanceProcAddr(g_instance, "vkCmdDispatchIndirect");
+    vkCmdEndQuery = (PFN_vkCmdEndQuery)vkGetInstanceProcAddr(g_instance, "vkCmdEndQuery");
+    vkCmdExecuteCommands = (PFN_vkCmdExecuteCommands)vkGetInstanceProcAddr(g_instance, "vkCmdExecuteCommands");
+    vkCmdFillBuffer = (PFN_vkCmdFillBuffer)vkGetInstanceProcAddr(g_instance, "vkCmdFillBuffer");
+    vkCmdPipelineBarrier = (PFN_vkCmdPipelineBarrier)vkGetInstanceProcAddr(g_instance, "vkCmdPipelineBarrier");
+    vkCmdPushConstants = (PFN_vkCmdPushConstants)vkGetInstanceProcAddr(g_instance, "vkCmdPushConstants");
+    vkCmdResetQueryPool = (PFN_vkCmdResetQueryPool)vkGetInstanceProcAddr(g_instance, "vkCmdResetQueryPool");
+    vkCmdResolveImage = (PFN_vkCmdResolveImage)vkGetInstanceProcAddr(g_instance, "vkCmdResolveImage");
+    vkCmdUpdateBuffer = (PFN_vkCmdUpdateBuffer)vkGetInstanceProcAddr(g_instance, "vkCmdUpdateBuffer");
+    vkCmdWriteTimestamp = (PFN_vkCmdWriteTimestamp)vkGetInstanceProcAddr(g_instance, "vkCmdWriteTimestamp");
+    vkCreateBuffer = (PFN_vkCreateBuffer)vkGetInstanceProcAddr(g_instance, "vkCreateBuffer");
+    vkCreateBufferView = (PFN_vkCreateBufferView)vkGetInstanceProcAddr(g_instance, "vkCreateBufferView");
+    vkCreateCommandPool = (PFN_vkCreateCommandPool)vkGetInstanceProcAddr(g_instance, "vkCreateCommandPool");
+    vkCreateComputePipelines = (PFN_vkCreateComputePipelines)vkGetInstanceProcAddr(g_instance, "vkCreateComputePipelines");
+    vkCreateDescriptorPool = (PFN_vkCreateDescriptorPool)vkGetInstanceProcAddr(g_instance, "vkCreateDescriptorPool");
+    vkCreateDescriptorSetLayout = (PFN_vkCreateDescriptorSetLayout)vkGetInstanceProcAddr(g_instance, "vkCreateDescriptorSetLayout");
+    vkCreateDevice = (PFN_vkCreateDevice)vkGetInstanceProcAddr(g_instance, "vkCreateDevice");
+    vkCreateFence = (PFN_vkCreateFence)vkGetInstanceProcAddr(g_instance, "vkCreateFence");
+    vkCreateImage = (PFN_vkCreateImage)vkGetInstanceProcAddr(g_instance, "vkCreateImage");
+    vkCreateImageView = (PFN_vkCreateImageView)vkGetInstanceProcAddr(g_instance, "vkCreateImageView");
+    vkCreatePipelineCache = (PFN_vkCreatePipelineCache)vkGetInstanceProcAddr(g_instance, "vkCreatePipelineCache");
+    vkCreatePipelineLayout = (PFN_vkCreatePipelineLayout)vkGetInstanceProcAddr(g_instance, "vkCreatePipelineLayout");
+    vkCreateQueryPool = (PFN_vkCreateQueryPool)vkGetInstanceProcAddr(g_instance, "vkCreateQueryPool");
+    vkCreateSampler = (PFN_vkCreateSampler)vkGetInstanceProcAddr(g_instance, "vkCreateSampler");
+    vkCreateSemaphore = (PFN_vkCreateSemaphore)vkGetInstanceProcAddr(g_instance, "vkCreateSemaphore");
+    vkCreateShaderModule = (PFN_vkCreateShaderModule)vkGetInstanceProcAddr(g_instance, "vkCreateShaderModule");
+    vkDestroyBuffer = (PFN_vkDestroyBuffer)vkGetInstanceProcAddr(g_instance, "vkDestroyBuffer");
+    vkDestroyBufferView = (PFN_vkDestroyBufferView)vkGetInstanceProcAddr(g_instance, "vkDestroyBufferView");
+    vkDestroyCommandPool = (PFN_vkDestroyCommandPool)vkGetInstanceProcAddr(g_instance, "vkDestroyCommandPool");
+    vkDestroyDescriptorPool = (PFN_vkDestroyDescriptorPool)vkGetInstanceProcAddr(g_instance, "vkDestroyDescriptorPool");
+    vkDestroyDescriptorSetLayout = (PFN_vkDestroyDescriptorSetLayout)vkGetInstanceProcAddr(g_instance, "vkDestroyDescriptorSetLayout");
+    vkDestroyDevice = (PFN_vkDestroyDevice)vkGetInstanceProcAddr(g_instance, "vkDestroyDevice");
+    vkDestroyFence = (PFN_vkDestroyFence)vkGetInstanceProcAddr(g_instance, "vkDestroyFence");
+    vkDestroyImage = (PFN_vkDestroyImage)vkGetInstanceProcAddr(g_instance, "vkDestroyImage");
+    vkDestroyImageView = (PFN_vkDestroyImageView)vkGetInstanceProcAddr(g_instance, "vkDestroyImageView");
+    vkDestroyInstance = (PFN_vkDestroyInstance)vkGetInstanceProcAddr(g_instance, "vkDestroyInstance");
+    vkDestroyPipeline = (PFN_vkDestroyPipeline)vkGetInstanceProcAddr(g_instance, "vkDestroyPipeline");
+    vkDestroyPipelineCache = (PFN_vkDestroyPipelineCache)vkGetInstanceProcAddr(g_instance, "vkDestroyPipelineCache");
+    vkDestroyPipelineLayout = (PFN_vkDestroyPipelineLayout)vkGetInstanceProcAddr(g_instance, "vkDestroyPipelineLayout");
+    vkDestroyQueryPool = (PFN_vkDestroyQueryPool)vkGetInstanceProcAddr(g_instance, "vkDestroyQueryPool");
+    vkDestroySampler = (PFN_vkDestroySampler)vkGetInstanceProcAddr(g_instance, "vkDestroySampler");
+    vkDestroySemaphore = (PFN_vkDestroySemaphore)vkGetInstanceProcAddr(g_instance, "vkDestroySemaphore");
+    vkDestroyShaderModule = (PFN_vkDestroyShaderModule)vkGetInstanceProcAddr(g_instance, "vkDestroyShaderModule");
+    vkDeviceWaitIdle = (PFN_vkDeviceWaitIdle)vkGetInstanceProcAddr(g_instance, "vkDeviceWaitIdle");
+    vkEndCommandBuffer = (PFN_vkEndCommandBuffer)vkGetInstanceProcAddr(g_instance, "vkEndCommandBuffer");
+    vkEnumerateDeviceExtensionProperties = (PFN_vkEnumerateDeviceExtensionProperties)vkGetInstanceProcAddr(g_instance, "vkEnumerateDeviceExtensionProperties");
+    vkEnumerateDeviceLayerProperties = (PFN_vkEnumerateDeviceLayerProperties)vkGetInstanceProcAddr(g_instance, "vkEnumerateDeviceLayerProperties");
+    vkEnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)vkGetInstanceProcAddr(g_instance, "vkEnumeratePhysicalDevices");
+    vkFlushMappedMemoryRanges = (PFN_vkFlushMappedMemoryRanges)vkGetInstanceProcAddr(g_instance, "vkFlushMappedMemoryRanges");
+    vkFreeCommandBuffers = (PFN_vkFreeCommandBuffers)vkGetInstanceProcAddr(g_instance, "vkFreeCommandBuffers");
+    vkFreeDescriptorSets = (PFN_vkFreeDescriptorSets)vkGetInstanceProcAddr(g_instance, "vkFreeDescriptorSets");
+    vkFreeMemory = (PFN_vkFreeMemory)vkGetInstanceProcAddr(g_instance, "vkFreeMemory");
+    vkGetBufferMemoryRequirements = (PFN_vkGetBufferMemoryRequirements)vkGetInstanceProcAddr(g_instance, "vkGetBufferMemoryRequirements");
+    vkGetDeviceMemoryCommitment = (PFN_vkGetDeviceMemoryCommitment)vkGetInstanceProcAddr(g_instance, "vkGetDeviceMemoryCommitment");
+    vkGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)vkGetInstanceProcAddr(g_instance, "vkGetDeviceProcAddr");
+    vkGetDeviceQueue = (PFN_vkGetDeviceQueue)vkGetInstanceProcAddr(g_instance, "vkGetDeviceQueue");
+    vkGetFenceStatus = (PFN_vkGetFenceStatus)vkGetInstanceProcAddr(g_instance, "vkGetFenceStatus");
+    vkGetImageMemoryRequirements = (PFN_vkGetImageMemoryRequirements)vkGetInstanceProcAddr(g_instance, "vkGetImageMemoryRequirements");
+    vkGetImageSubresourceLayout = (PFN_vkGetImageSubresourceLayout)vkGetInstanceProcAddr(g_instance, "vkGetImageSubresourceLayout");
+    vkGetPhysicalDeviceFeatures = (PFN_vkGetPhysicalDeviceFeatures)vkGetInstanceProcAddr(g_instance, "vkGetPhysicalDeviceFeatures");
+    vkGetPhysicalDeviceFormatProperties = (PFN_vkGetPhysicalDeviceFormatProperties)vkGetInstanceProcAddr(g_instance, "vkGetPhysicalDeviceFormatProperties");
+    vkGetPhysicalDeviceImageFormatProperties = (PFN_vkGetPhysicalDeviceImageFormatProperties)vkGetInstanceProcAddr(g_instance, "vkGetPhysicalDeviceImageFormatProperties");
+    vkGetPhysicalDeviceMemoryProperties = (PFN_vkGetPhysicalDeviceMemoryProperties)vkGetInstanceProcAddr(g_instance, "vkGetPhysicalDeviceMemoryProperties");
+    vkGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)vkGetInstanceProcAddr(g_instance, "vkGetPhysicalDeviceProperties");
+    vkGetPhysicalDeviceQueueFamilyProperties = (PFN_vkGetPhysicalDeviceQueueFamilyProperties)vkGetInstanceProcAddr(g_instance, "vkGetPhysicalDeviceQueueFamilyProperties");
+    vkGetPipelineCacheData = (PFN_vkGetPipelineCacheData)vkGetInstanceProcAddr(g_instance, "vkGetPipelineCacheData");
+    vkGetQueryPoolResults = (PFN_vkGetQueryPoolResults)vkGetInstanceProcAddr(g_instance, "vkGetQueryPoolResults");
+    vkInvalidateMappedMemoryRanges = (PFN_vkInvalidateMappedMemoryRanges)vkGetInstanceProcAddr(g_instance, "vkInvalidateMappedMemoryRanges");
+    vkMapMemory = (PFN_vkMapMemory)vkGetInstanceProcAddr(g_instance, "vkMapMemory");
+    vkMergePipelineCaches = (PFN_vkMergePipelineCaches)vkGetInstanceProcAddr(g_instance, "vkMergePipelineCaches");
+    vkQueueSubmit = (PFN_vkQueueSubmit)vkGetInstanceProcAddr(g_instance, "vkQueueSubmit");
+    vkQueueWaitIdle = (PFN_vkQueueWaitIdle)vkGetInstanceProcAddr(g_instance, "vkQueueWaitIdle");
+    vkResetCommandBuffer = (PFN_vkResetCommandBuffer)vkGetInstanceProcAddr(g_instance, "vkResetCommandBuffer");
+    vkResetCommandPool = (PFN_vkResetCommandPool)vkGetInstanceProcAddr(g_instance, "vkResetCommandPool");
+    vkResetDescriptorPool = (PFN_vkResetDescriptorPool)vkGetInstanceProcAddr(g_instance, "vkResetDescriptorPool");
+    vkResetFences = (PFN_vkResetFences)vkGetInstanceProcAddr(g_instance, "vkResetFences");
+    vkUnmapMemory = (PFN_vkUnmapMemory)vkGetInstanceProcAddr(g_instance, "vkUnmapMemory");
+    vkUpdateDescriptorSets = (PFN_vkUpdateDescriptorSets)vkGetInstanceProcAddr(g_instance, "vkUpdateDescriptorSets");
+    vkWaitForFences = (PFN_vkWaitForFences)vkGetInstanceProcAddr(g_instance, "vkWaitForFences");
+
+    return 0;
+}
+
 static int init_instance_extension()
 {
     if (support_VK_KHR_external_memory_capabilities)
@@ -704,7 +952,6 @@ static int init_instance_extension()
         vkGetPhysicalDeviceImageFormatProperties2KHR = (PFN_vkGetPhysicalDeviceImageFormatProperties2KHR)vkGetInstanceProcAddr(g_instance, "vkGetPhysicalDeviceImageFormatProperties2KHR");
         vkGetPhysicalDeviceQueueFamilyProperties2KHR = (PFN_vkGetPhysicalDeviceQueueFamilyProperties2KHR)vkGetInstanceProcAddr(g_instance, "vkGetPhysicalDeviceQueueFamilyProperties2KHR");
         vkGetPhysicalDeviceMemoryProperties2KHR = (PFN_vkGetPhysicalDeviceMemoryProperties2KHR)vkGetInstanceProcAddr(g_instance, "vkGetPhysicalDeviceMemoryProperties2KHR");
-        vkGetPhysicalDeviceSparseImageFormatProperties2KHR = (PFN_vkGetPhysicalDeviceSparseImageFormatProperties2KHR)vkGetInstanceProcAddr(g_instance, "vkGetPhysicalDeviceSparseImageFormatProperties2KHR");
     }
 
     if (support_VK_KHR_get_surface_capabilities2)
@@ -921,14 +1168,34 @@ static int find_default_vulkan_device_index()
     return -1;
 }
 
-int create_gpu_instance()
+int create_gpu_instance(const char* driver_path)
 {
     MutexLockGuard lock(g_instance_lock);
 
-    if ((VkInstance)g_instance != 0)
-        return 0;
+    if (g_instance.created != 0)
+        return g_instance.instance ? 0 : -1;
+
+    g_instance.created = 1;
 
     // NCNN_LOGE("create_gpu_instance");
+
+#if NCNN_SIMPLEVK
+    // load vulkan driver
+    {
+        int ret = load_vulkan_driver(driver_path);
+        if (ret != 0)
+        {
+            NCNN_LOGE("load vulkan driver failed");
+            return -1;
+        }
+    }
+#else
+    if (driver_path)
+    {
+        NCNN_LOGE("custom vulkan driver is not supported when NCNN_SIMPLEVK is off");
+        NCNN_LOGE("will always use the system vulkan driver");
+    }
+#endif // NCNN_SIMPLEVK
 
     VkResult ret;
 
@@ -1136,6 +1403,8 @@ int create_gpu_instance()
 
     g_instance.instance = instance;
 
+    init_instance_core();
+
 #if ENABLE_VALIDATION_LAYER
     if (support_VK_EXT_debug_utils)
     {
@@ -1189,15 +1458,15 @@ int create_gpu_instance()
         VkPhysicalDeviceProperties physicalDeviceProperties;
         vkGetPhysicalDeviceProperties(physicalDevice, &physicalDeviceProperties);
 
-        //         NCNN_LOGE("[%u] apiVersion = %u.%u.%u", i, VK_VERSION_MAJOR(physicalDeviceProperties.apiVersion),
-        //             VK_VERSION_MINOR(physicalDeviceProperties.apiVersion), VK_VERSION_PATCH(physicalDeviceProperties.apiVersion));
-        //         NCNN_LOGE("[%u] driverVersion = %u.%u.%u", i, VK_VERSION_MAJOR(physicalDeviceProperties.driverVersion),
-        //             VK_VERSION_MINOR(physicalDeviceProperties.driverVersion), VK_VERSION_PATCH(physicalDeviceProperties.driverVersion));
-        //         NCNN_LOGE("[%u] vendorID = %x", i, physicalDeviceProperties.vendorID);
-        //         NCNN_LOGE("[%u] deviceID = %x", i, physicalDeviceProperties.deviceID);
-        //         NCNN_LOGE("[%u] deviceType = %x", i, physicalDeviceProperties.deviceType);
-        //         NCNN_LOGE("[%u] deviceName = %s", i, physicalDeviceProperties.deviceName);
-        //         NCNN_LOGE("[%u] pipelineCacheUUID = %u", i, physicalDeviceProperties.pipelineCacheUUID);
+        // NCNN_LOGE("[%u] apiVersion = %u.%u.%u", i, VK_VERSION_MAJOR(physicalDeviceProperties.apiVersion),
+        //     VK_VERSION_MINOR(physicalDeviceProperties.apiVersion), VK_VERSION_PATCH(physicalDeviceProperties.apiVersion));
+        // NCNN_LOGE("[%u] driverVersion = %u.%u.%u", i, VK_VERSION_MAJOR(physicalDeviceProperties.driverVersion),
+        //     VK_VERSION_MINOR(physicalDeviceProperties.driverVersion), VK_VERSION_PATCH(physicalDeviceProperties.driverVersion));
+        // NCNN_LOGE("[%u] vendorID = %x", i, physicalDeviceProperties.vendorID);
+        // NCNN_LOGE("[%u] deviceID = %x", i, physicalDeviceProperties.deviceID);
+        // NCNN_LOGE("[%u] deviceType = %x", i, physicalDeviceProperties.deviceType);
+        // NCNN_LOGE("[%u] deviceName = %s", i, physicalDeviceProperties.deviceName);
+        // NCNN_LOGE("[%u] pipelineCacheUUID = %u", i, physicalDeviceProperties.pipelineCacheUUID);
 
         // mali
         // t760 = 0x13b5 0x7500001 / 0x7501000
@@ -1427,6 +1696,7 @@ int create_gpu_instance()
         gpu_info.support_VK_KHR_cooperative_matrix = 0;
         gpu_info.support_VK_KHR_dedicated_allocation = 0;
         gpu_info.support_VK_KHR_descriptor_update_template = 0;
+        gpu_info.support_VK_KHR_driver_properties = 0;
         gpu_info.support_VK_KHR_external_memory = 0;
         gpu_info.support_VK_KHR_get_memory_requirements2 = 0;
         gpu_info.support_VK_KHR_maintenance1 = 0;
@@ -1471,6 +1741,8 @@ int create_gpu_instance()
                 gpu_info.support_VK_KHR_dedicated_allocation = exp.specVersion;
             else if (strcmp(exp.extensionName, "VK_KHR_descriptor_update_template") == 0)
                 gpu_info.support_VK_KHR_descriptor_update_template = exp.specVersion;
+            else if (strcmp(exp.extensionName, "VK_KHR_driver_properties") == 0)
+                gpu_info.support_VK_KHR_driver_properties = exp.specVersion;
             else if (strcmp(exp.extensionName, "VK_KHR_external_memory") == 0)
                 gpu_info.support_VK_KHR_external_memory = exp.specVersion;
             else if (strcmp(exp.extensionName, "VK_KHR_get_memory_requirements2") == 0)
@@ -1532,15 +1804,20 @@ int create_gpu_instance()
         // check features
         gpu_info.support_fp16_packed = true;
         gpu_info.support_fp16_storage = false;
+        gpu_info.support_fp16_uniform = false;
         gpu_info.support_fp16_arithmetic = false;
         gpu_info.support_int8_packed = true;
         gpu_info.support_int8_storage = false;
+        gpu_info.support_int8_uniform = false;
         gpu_info.support_int8_arithmetic = false;
         gpu_info.support_ycbcr_conversion = false;
         gpu_info.support_cooperative_matrix = false;
+        gpu_info.support_cooperative_matrix_8_8_16 = false;
         gpu_info.support_cooperative_matrix_16_8_8 = false;
         gpu_info.support_cooperative_matrix_16_8_16 = false;
         gpu_info.support_cooperative_matrix_16_16_16 = false;
+        gpu_info.driver_id = 0;
+        gpu_info.driver_name[0] = '\0';
         if (support_VK_KHR_get_physical_device_properties2)
         {
             void* queryExtensionFeatures = 0;
@@ -1603,6 +1880,16 @@ int create_gpu_instance()
                 queryExtensionFeatures = &queryCooperativeMatrixFeaturesNV;
             }
 
+            // query driver properties
+            VkPhysicalDeviceDriverPropertiesKHR queryDriverProperties;
+            queryDriverProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES_KHR;
+            queryDriverProperties.pNext = 0;
+            if (gpu_info.support_VK_KHR_driver_properties)
+            {
+                queryDriverProperties.pNext = queryExtensionFeatures;
+                queryExtensionFeatures = &queryDriverProperties;
+            }
+
             VkPhysicalDeviceFeatures2KHR queryFeatures;
             queryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR;
             queryFeatures.pNext = queryExtensionFeatures;
@@ -1612,11 +1899,13 @@ int create_gpu_instance()
             if (gpu_info.support_VK_KHR_8bit_storage)
             {
                 gpu_info.support_int8_storage = query8BitStorageFeatures.storageBuffer8BitAccess;
+                gpu_info.support_int8_uniform = query8BitStorageFeatures.uniformAndStorageBuffer8BitAccess;
             }
             if (gpu_info.support_VK_KHR_16bit_storage && queryFeatures.features.shaderStorageImageExtendedFormats)
             {
                 // shaderStorageImageExtendedFormats enables r16f format in storage image
                 gpu_info.support_fp16_storage = query16BitStorageFeatures.storageBuffer16BitAccess;
+                gpu_info.support_fp16_uniform = query16BitStorageFeatures.uniformAndStorageBuffer16BitAccess;
             }
             if (gpu_info.support_VK_KHR_shader_float16_int8)
             {
@@ -1634,6 +1923,11 @@ int create_gpu_instance()
             else if (gpu_info.support_VK_NV_cooperative_matrix)
             {
                 gpu_info.support_cooperative_matrix = queryCooperativeMatrixFeaturesNV.cooperativeMatrix;
+            }
+            if (gpu_info.support_VK_KHR_driver_properties)
+            {
+                gpu_info.driver_id = queryDriverProperties.driverID;
+                memcpy(gpu_info.driver_name, queryDriverProperties.driverName, VK_MAX_DRIVER_NAME_SIZE);
             }
         }
         else
@@ -1667,6 +1961,13 @@ int create_gpu_instance()
             gpu_info.support_fp16_arithmetic = false;
         }
 
+        if (gpu_info.driver_id == VK_DRIVER_ID_MESA_RADV || gpu_info.driver_id == VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA)
+        {
+            // cooperative matrix produces wrong result on mesa vulkan drivers :(
+            // https://gitlab.freedesktop.org/mesa/mesa/-/issues/10847
+            gpu_info.support_cooperative_matrix = false;
+        }
+
         if (gpu_info.support_cooperative_matrix)
         {
             // query supported cooperative matrix types and operations
@@ -1691,6 +1992,13 @@ int create_gpu_instance()
                     const VkCooperativeMatrixPropertiesKHR& cmp = properties[j];
                     // NCNN_LOGE("cpm %2d %2d %2d  %d %d %d %d  %d", cmp.MSize, cmp.NSize, cmp.KSize, cmp.AType, cmp.BType, cmp.CType, cmp.ResultType, cmp.scope);
 
+                    if (cmp.MSize == 8 && cmp.NSize == 8 && cmp.KSize == 16
+                            && cmp.AType == VK_COMPONENT_TYPE_FLOAT16_KHR && cmp.BType == VK_COMPONENT_TYPE_FLOAT16_KHR
+                            && cmp.CType == VK_COMPONENT_TYPE_FLOAT32_KHR && cmp.ResultType == VK_COMPONENT_TYPE_FLOAT32_KHR
+                            && cmp.scope == VK_SCOPE_SUBGROUP_KHR)
+                    {
+                        gpu_info.support_cooperative_matrix_8_8_16 = true;
+                    }
                     if (cmp.MSize == 16 && cmp.NSize == 8 && cmp.KSize == 8
                             && cmp.AType == VK_COMPONENT_TYPE_FLOAT16_KHR && cmp.BType == VK_COMPONENT_TYPE_FLOAT16_KHR
                             && cmp.CType == VK_COMPONENT_TYPE_FLOAT32_KHR && cmp.ResultType == VK_COMPONENT_TYPE_FLOAT32_KHR
@@ -1740,6 +2048,13 @@ int create_gpu_instance()
                     const VkCooperativeMatrixPropertiesNV& cmp = properties[j];
                     // NCNN_LOGE("cpm %2d %2d %2d  %d %d %d %d  %d", cmp.MSize, cmp.NSize, cmp.KSize, cmp.AType, cmp.BType, cmp.CType, cmp.DType, cmp.scope);
 
+                    if (cmp.MSize == 8 && cmp.NSize == 8 && cmp.KSize == 16
+                            && cmp.AType == VK_COMPONENT_TYPE_FLOAT16_NV && cmp.BType == VK_COMPONENT_TYPE_FLOAT16_NV
+                            && cmp.CType == VK_COMPONENT_TYPE_FLOAT32_NV && cmp.DType == VK_COMPONENT_TYPE_FLOAT32_NV
+                            && cmp.scope == VK_SCOPE_SUBGROUP_NV)
+                    {
+                        gpu_info.support_cooperative_matrix_8_8_16 = true;
+                    }
                     if (cmp.MSize == 16 && cmp.NSize == 8 && cmp.KSize == 8
                             && cmp.AType == VK_COMPONENT_TYPE_FLOAT16_NV && cmp.BType == VK_COMPONENT_TYPE_FLOAT16_NV
                             && cmp.CType == VK_COMPONENT_TYPE_FLOAT32_NV && cmp.DType == VK_COMPONENT_TYPE_FLOAT32_NV
@@ -1773,17 +2088,17 @@ int create_gpu_instance()
         NCNN_LOGE("[%u %s]  bugsbn1=%d  bugbilz=%d  bugcopc=%d  bugihfa=%d", i, physicalDeviceProperties.deviceName,
                   gpu_info.bug_storage_buffer_no_l1, gpu_info.bug_buffer_image_load_zero, gpu_info.bug_corrupted_online_pipeline_cache, gpu_info.bug_implicit_fp16_arithmetic);
 
-        NCNN_LOGE("[%u %s]  fp16-p/s/a=%d/%d/%d  int8-p/s/a=%d/%d/%d", i, physicalDeviceProperties.deviceName,
-                  gpu_info.support_fp16_packed, gpu_info.support_fp16_storage, gpu_info.support_fp16_arithmetic,
-                  gpu_info.support_int8_packed, gpu_info.support_int8_storage, gpu_info.support_int8_arithmetic);
+        NCNN_LOGE("[%u %s]  fp16-p/s/u/a=%d/%d/%d/%d  int8-p/s/u/a=%d/%d/%d/%d", i, physicalDeviceProperties.deviceName,
+                  gpu_info.support_fp16_packed, gpu_info.support_fp16_storage, gpu_info.support_fp16_uniform, gpu_info.support_fp16_arithmetic,
+                  gpu_info.support_int8_packed, gpu_info.support_int8_storage, gpu_info.support_int8_uniform, gpu_info.support_int8_arithmetic);
 
         NCNN_LOGE("[%u %s]  subgroup=%u  basic/vote/ballot/shuffle=%d/%d/%d/%d", i, physicalDeviceProperties.deviceName,
                   gpu_info.subgroup_size, gpu_info.support_subgroup_basic, gpu_info.support_subgroup_vote,
                   gpu_info.support_subgroup_ballot, gpu_info.support_subgroup_shuffle);
 
-        NCNN_LOGE("[%u %s]  fp16-matrix-16_8_8/16_8_16/16_16_16=%d/%d/%d", i, physicalDeviceProperties.deviceName,
-                  gpu_info.support_cooperative_matrix_16_8_8, gpu_info.support_cooperative_matrix_16_8_16,
-                  gpu_info.support_cooperative_matrix_16_16_16);
+        NCNN_LOGE("[%u %s]  fp16-8x8x16/16x8x8/16x8x16/16x16x16=%d/%d/%d/%d", i, physicalDeviceProperties.deviceName,
+                  gpu_info.support_cooperative_matrix_8_8_16, gpu_info.support_cooperative_matrix_16_8_8,
+                  gpu_info.support_cooperative_matrix_16_8_16, gpu_info.support_cooperative_matrix_16_16_16);
 
         gpu_info_index++;
     }
@@ -1793,7 +2108,18 @@ int create_gpu_instance()
     // the default gpu device
     g_default_gpu_index = find_default_vulkan_device_index();
 
-    glslang::InitializeProcess();
+    g_instance.glslang_initialized = glslang::InitializeProcess();
+
+    // the global __ncnn_vulkan_instance_holder destructor will call destroy_gpu_instance() on exit
+    // but it seems to be too late for nvidia driver :(
+    // driver's internal data structure has been destroyed when called, causing segfault
+    // atexit() seems to be helpful for calling it earlier    --- nihui
+    static int destroy_gpu_instance_atexit_registered = 0;
+    if (!destroy_gpu_instance_atexit_registered)
+    {
+        atexit(destroy_gpu_instance);
+        destroy_gpu_instance_atexit_registered = 1;
+    }
 
     return 0;
 }
@@ -1807,12 +2133,29 @@ void destroy_gpu_instance()
 {
     MutexLockGuard lock(g_instance_lock);
 
-    if ((VkInstance)g_instance == 0)
+    if (g_instance.created == 0)
         return;
+
+    for (int i = 0; i < NCNN_MAX_GPU_COUNT; i++)
+    {
+        VulkanDevice* vulkan_device = g_default_vkdev[i];
+        if (vulkan_device)
+        {
+            VkDevice vkdev = g_default_vkdev[i]->vkdevice();
+            if (vkdev)
+            {
+                vkDeviceWaitIdle(vkdev);
+            }
+        }
+    }
 
     // NCNN_LOGE("destroy_gpu_instance");
 
-    glslang::FinalizeProcess();
+    if (g_instance.glslang_initialized)
+    {
+        glslang::FinalizeProcess();
+        g_instance.glslang_initialized = false;
+    }
 
     for (int i = 0; i < NCNN_MAX_GPU_COUNT; i++)
     {
@@ -1824,29 +2167,38 @@ void destroy_gpu_instance()
     }
 
 #if ENABLE_VALIDATION_LAYER
-    if (support_VK_EXT_debug_utils)
+    if (support_VK_EXT_debug_utils && g_instance.callback)
     {
         DestroyDebugUtilsMessengerEXT(g_instance, g_instance.callback, NULL);
         g_instance.callback = 0;
     }
 #endif // ENABLE_VALIDATION_LAYER
 
-    vkDestroyInstance(g_instance, 0);
+    if (vkDestroyInstance)
+    {
+        vkDestroyInstance(g_instance, 0);
+        vkDestroyInstance = 0;
+    }
 
     g_instance.instance = 0;
-}
 
-static bool is_gpu_instance_ready()
-{
-    MutexLockGuard lock(g_instance_lock);
+#if NCNN_SIMPLEVK
+    unload_vulkan_driver();
+#endif
 
-    return (VkInstance)g_instance != 0;
+    g_instance.created = 0;
 }
 
 static void try_create_gpu_instance()
 {
-    if (!is_gpu_instance_ready())
-        create_gpu_instance();
+    {
+        MutexLockGuard lock(g_instance_lock);
+
+        if (g_instance.created != 0)
+            return;
+    }
+
+    create_gpu_instance();
 }
 
 int get_gpu_count()
@@ -1907,10 +2259,7 @@ public:
 class VulkanDevicePrivate
 {
 public:
-    VulkanDevicePrivate(VulkanDevice* _vkdev)
-        : vkdev(_vkdev)
-    {
-    }
+    VulkanDevicePrivate(VulkanDevice* _vkdev);
     VulkanDevice* const vkdev;
 
     // dummy buffer and image
@@ -1965,7 +2314,21 @@ public:
     // to pack1 | pack4 | pack8
     mutable ncnn::Packing_vulkan* uop_packing[2][2][3][3][3];
     mutable Mutex uop_lock;
+
+    // device is valid and sucessfully initialized
+    bool valid;
 };
+
+VulkanDevicePrivate::VulkanDevicePrivate(VulkanDevice* _vkdev)
+    : vkdev(_vkdev)
+{
+    device = 0;
+    texelfetch_sampler = 0;
+    dummy_allocator = 0;
+    pipeline_cache = 0;
+    valid = false;
+    memset(uop_packing, 0, sizeof(uop_packing));
+}
 
 int VulkanDevicePrivate::create_dummy_buffer_image()
 {
@@ -2005,7 +2368,11 @@ void VulkanDevicePrivate::destroy_dummy_buffer_image()
     dummy_image_readonly.release();
 #endif
 
-    delete dummy_allocator;
+    if (dummy_allocator)
+    {
+        delete dummy_allocator;
+        dummy_allocator = 0;
+    }
 }
 
 const ncnn::Packing_vulkan* VulkanDevicePrivate::get_utility_operator(int storage_type_from, int storage_type_to, int cast_type_from_index, int cast_type_to_index, int packing_type_to_index) const
@@ -2157,6 +2524,8 @@ VulkanDevice::VulkanDevice(int device_index)
         enabledExtensions.push_back("VK_KHR_dedicated_allocation");
     if (info.support_VK_KHR_descriptor_update_template())
         enabledExtensions.push_back("VK_KHR_descriptor_update_template");
+    if (info.support_VK_KHR_driver_properties())
+        enabledExtensions.push_back("VK_KHR_driver_properties");
     if (info.support_VK_KHR_external_memory())
         enabledExtensions.push_back("VK_KHR_external_memory");
     if (info.support_VK_KHR_get_memory_requirements2())
@@ -2209,7 +2578,7 @@ VulkanDevice::VulkanDevice(int device_index)
     enabled8BitStorageFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES_KHR;
     enabled8BitStorageFeatures.pNext = 0;
     enabled8BitStorageFeatures.storageBuffer8BitAccess = info.support_int8_storage();
-    enabled8BitStorageFeatures.uniformAndStorageBuffer8BitAccess = VK_FALSE;
+    enabled8BitStorageFeatures.uniformAndStorageBuffer8BitAccess = info.support_int8_uniform();
     enabled8BitStorageFeatures.storagePushConstant8 = VK_FALSE;
     if (support_VK_KHR_get_physical_device_properties2 && info.support_VK_KHR_8bit_storage())
     {
@@ -2222,7 +2591,7 @@ VulkanDevice::VulkanDevice(int device_index)
     enabled16BitStorageFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES_KHR;
     enabled16BitStorageFeatures.pNext = 0;
     enabled16BitStorageFeatures.storageBuffer16BitAccess = info.support_fp16_storage();
-    enabled16BitStorageFeatures.uniformAndStorageBuffer16BitAccess = VK_FALSE;
+    enabled16BitStorageFeatures.uniformAndStorageBuffer16BitAccess = info.support_fp16_uniform();
     enabled16BitStorageFeatures.storagePushConstant16 = VK_FALSE;
     enabled16BitStorageFeatures.storageInputOutput16 = VK_FALSE;
     if (support_VK_KHR_get_physical_device_properties2 && info.support_VK_KHR_16bit_storage())
@@ -2348,6 +2717,7 @@ VulkanDevice::VulkanDevice(int device_index)
     if (ret != VK_SUCCESS)
     {
         NCNN_LOGE("vkCreateDevice failed %d", ret);
+        return;
     }
 
     init_device_extension();
@@ -2407,7 +2777,6 @@ VulkanDevice::VulkanDevice(int device_index)
         samplerCreateInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
         samplerCreateInfo.unnormalizedCoordinates = VK_TRUE;
 
-        d->texelfetch_sampler = 0;
         ret = vkCreateSampler(d->device, &samplerCreateInfo, 0, &d->texelfetch_sampler);
         if (ret != VK_SUCCESS)
         {
@@ -2419,11 +2788,12 @@ VulkanDevice::VulkanDevice(int device_index)
     if (cret != 0)
     {
         NCNN_LOGE("VulkanDevice create_dummy_buffer_image failed %d", cret);
+        return;
     }
 
     d->pipeline_cache = new PipelineCache(this);
 
-    memset(d->uop_packing, 0, sizeof(d->uop_packing));
+    d->valid = true;
 }
 
 VulkanDevice::~VulkanDevice()
@@ -2448,9 +2818,15 @@ VulkanDevice::~VulkanDevice()
     }
     d->staging_allocators.clear();
 
-    delete d->pipeline_cache;
+    if (d->pipeline_cache)
+    {
+        delete d->pipeline_cache;
+    }
 
-    vkDestroyDevice(d->device, 0);
+    if (d->device)
+    {
+        vkDestroyDevice(d->device, 0);
+    }
 
     delete d;
 }
@@ -2468,6 +2844,11 @@ VulkanDevice& VulkanDevice::operator=(const VulkanDevice&)
 VkDevice VulkanDevice::vkdevice() const
 {
     return d->device;
+}
+
+bool VulkanDevice::is_valid() const
+{
+    return d->valid;
 }
 
 VkShaderModule VulkanDevice::compile_shader_module(const uint32_t* spv_data, size_t spv_data_size) const
@@ -3326,14 +3707,6 @@ int VulkanDevice::init_device_extension()
         vkGetDeviceMemoryOpaqueCaptureAddressKHR = (PFN_vkGetDeviceMemoryOpaqueCaptureAddressKHR)vkGetDeviceProcAddr(d->device, "vkGetDeviceMemoryOpaqueCaptureAddressKHR");
     }
 
-    if (info.support_VK_KHR_create_renderpass2())
-    {
-        vkCmdBeginRenderPass2KHR = (PFN_vkCmdBeginRenderPass2KHR)vkGetDeviceProcAddr(d->device, "vkCmdBeginRenderPass2KHR");
-        vkCmdEndRenderPass2KHR = (PFN_vkCmdEndRenderPass2KHR)vkGetDeviceProcAddr(d->device, "vkCmdEndRenderPass2KHR");
-        vkCmdNextSubpass2KHR = (PFN_vkCmdNextSubpass2KHR)vkGetDeviceProcAddr(d->device, "vkCmdNextSubpass2KHR");
-        vkCreateRenderPass2KHR = (PFN_vkCreateRenderPass2KHR)vkGetDeviceProcAddr(d->device, "vkCreateRenderPass2KHR");
-    }
-
     if (info.support_VK_KHR_descriptor_update_template())
     {
         vkCreateDescriptorUpdateTemplateKHR = (PFN_vkCreateDescriptorUpdateTemplateKHR)vkGetDeviceProcAddr(d->device, "vkCreateDescriptorUpdateTemplateKHR");
@@ -3345,7 +3718,6 @@ int VulkanDevice::init_device_extension()
     {
         vkGetImageMemoryRequirements2KHR = (PFN_vkGetImageMemoryRequirements2KHR)vkGetDeviceProcAddr(d->device, "vkGetImageMemoryRequirements2KHR");
         vkGetBufferMemoryRequirements2KHR = (PFN_vkGetBufferMemoryRequirements2KHR)vkGetDeviceProcAddr(d->device, "vkGetBufferMemoryRequirements2KHR");
-        vkGetImageSparseMemoryRequirements2KHR = (PFN_vkGetImageSparseMemoryRequirements2KHR)vkGetDeviceProcAddr(d->device, "vkGetImageSparseMemoryRequirements2KHR");
     }
 
     if (info.support_VK_KHR_maintenance1())
@@ -3605,10 +3977,15 @@ int compile_spirv_module(const char* comp_data, int comp_data_size, const Option
         custom_defines.push_back(std::make_pair("afpmat4", "mat4"));
     }
 
-    if (opt.use_fp16_storage && opt.use_fp16_arithmetic)
+    if (opt.use_fp16_storage && opt.use_fp16_uniform && opt.use_fp16_arithmetic)
     {
         custom_defines.push_back(std::make_pair("lfp", "float16_t"));
         custom_defines.push_back(std::make_pair("lfpvec4", "f16vec4"));
+    }
+    else if (opt.use_fp16_storage && opt.use_fp16_arithmetic)
+    {
+        custom_defines.push_back(std::make_pair("lfp", "float"));
+        custom_defines.push_back(std::make_pair("lfpvec4", "uint64_t"));
     }
     else if (opt.use_fp16_storage || opt.use_fp16_packed)
     {
@@ -3621,13 +3998,21 @@ int compile_spirv_module(const char* comp_data, int comp_data_size, const Option
         custom_defines.push_back(std::make_pair("lfpvec4", "vec4"));
     }
 
-    if (opt.use_fp16_storage && opt.use_fp16_arithmetic)
+    if (opt.use_fp16_storage && opt.use_fp16_uniform && opt.use_fp16_arithmetic)
     {
         custom_defines.push_back(std::make_pair("sfp2lfp(v)", "v"));
         custom_defines.push_back(std::make_pair("sfp2lfpvec4(v)", "v"));
 
         custom_defines.push_back(std::make_pair("lfp2afp(v)", "v"));
         custom_defines.push_back(std::make_pair("lfp2afpvec4(v)", "v"));
+    }
+    else if (opt.use_fp16_storage && opt.use_fp16_arithmetic)
+    {
+        custom_defines.push_back(std::make_pair("sfp2lfp(v)", "float(v)"));
+        custom_defines.push_back(std::make_pair("sfp2lfpvec4(v)", "pack64(halfBitsToUInt16(v))"));
+
+        custom_defines.push_back(std::make_pair("lfp2afp(v)", "float16_t(v)"));
+        custom_defines.push_back(std::make_pair("lfp2afpvec4(v)", "int16BitsToHalf(unpack16(v))"));
     }
     else if (opt.use_fp16_packed && opt.use_fp16_arithmetic)
     {
@@ -3956,6 +4341,11 @@ int compile_spirv_module(const char* comp_data, int comp_data_size, const Option
         custom_defines.push_back(std::make_pair("NCNN_fp16_packed", "1"));
     }
 
+    if (opt.use_fp16_uniform)
+    {
+        custom_defines.push_back(std::make_pair("NCNN_fp16_uniform", "1"));
+    }
+
     if (opt.use_fp16_arithmetic)
     {
         custom_defines.push_back(std::make_pair("NCNN_fp16_arithmetic", "1"));
@@ -3968,6 +4358,11 @@ int compile_spirv_module(const char* comp_data, int comp_data_size, const Option
     else if (opt.use_int8_packed)
     {
         custom_defines.push_back(std::make_pair("NCNN_int8_packed", "1"));
+    }
+
+    if (opt.use_int8_uniform)
+    {
+        custom_defines.push_back(std::make_pair("NCNN_int8_uniform", "1"));
     }
 
     if (opt.use_int8_arithmetic)

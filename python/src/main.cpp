@@ -34,6 +34,20 @@ using namespace ncnn;
 
 namespace py = pybind11;
 
+class DataReaderFromMemoryCopy : public DataReaderFromMemory
+{
+public:
+    explicit DataReaderFromMemoryCopy(const unsigned char*& mem)
+        : DataReaderFromMemory(mem)
+    {
+    }
+
+    virtual size_t reference(size_t size, const void** buf) const
+    {
+        return 0;
+    }
+};
+
 struct LayerFactory
 {
     std::string name;
@@ -956,6 +970,13 @@ PYBIND11_MODULE(ncnn, m)
 #endif // NCNN_STRING
     .def("load_param_bin", (int (Net::*)(const char*)) & Net::load_param_bin, py::arg("protopath"))
     .def("load_model", (int (Net::*)(const char*)) & Net::load_model, py::arg("modelpath"))
+    .def(
+    "load_model_mem", [](Net& net, const char* mem) {
+        const unsigned char* _mem = (const unsigned char*)mem;
+        DataReaderFromMemoryCopy dr(_mem);
+        net.load_model(dr);
+    },
+    py::arg("mem"))
 #endif // NCNN_STDIO
 
     .def("clear", &Net::clear)
@@ -1211,7 +1232,7 @@ PYBIND11_MODULE(ncnn, m)
 #endif //NCNN_STRING
 
 #if NCNN_VULKAN
-    m.def("create_gpu_instance", &create_gpu_instance);
+    m.def("create_gpu_instance", &create_gpu_instance, py::arg("driver_path") = ((const char*)0));
     m.def("destroy_gpu_instance", &destroy_gpu_instance);
     m.def("get_gpu_count", &get_gpu_count);
     m.def("get_default_gpu_index", &get_default_gpu_index);
@@ -1277,7 +1298,8 @@ PYBIND11_MODULE(ncnn, m)
     .def("pipeline_cache_uuid", [](GpuInfo& gpuinfo) {
         return py::memoryview::from_buffer(gpuinfo.pipeline_cache_uuid(), {VK_UUID_SIZE}, {sizeof(uint8_t) * VK_UUID_SIZE});
     })
-    .def("type", &GpuInfo::type);
+    .def("type", &GpuInfo::type)
+    .def("device_name", &GpuInfo::device_name);
 
     py::class_<VulkanDevice>(m, "VulkanDevice")
     .def(py::init<int>(), py::arg("device_index") = 0)
@@ -1285,7 +1307,12 @@ PYBIND11_MODULE(ncnn, m)
     "info", [](VulkanDevice& dev) {
         return &dev.info;
     },
-    py::return_value_policy::reference_internal);
+    py::return_value_policy::reference_internal)
+    .def("acquire_blob_allocator", &VulkanDevice::acquire_blob_allocator)
+    .def("reclaim_blob_allocator", &VulkanDevice::reclaim_blob_allocator, py::arg("vkallocator"))
+    .def("acquire_staging_allocator", &VulkanDevice::acquire_staging_allocator)
+    .def("reclaim_staging_allocator", &VulkanDevice::reclaim_staging_allocator, py::arg("vkallocator"))
+    .def("get_heap_budget", &VulkanDevice::get_heap_budget);
 #endif // NCNN_VULKAN
 
     m.doc() = R"pbdoc(

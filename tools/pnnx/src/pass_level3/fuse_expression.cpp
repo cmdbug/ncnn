@@ -20,6 +20,23 @@
 
 namespace pnnx {
 
+static bool operand_maybe_shape_tensor(const Operand* operand)
+{
+    const Operator* op = operand->producer;
+
+    if (op->type == "aten::size")
+    {
+        return op->inputs.size() == 1;
+    }
+
+    if (op->type == "Tensor.to")
+    {
+        return operand_maybe_shape_tensor(op->inputs[0]);
+    }
+
+    return false;
+}
+
 static bool operand_maybe_tensor(const Operand* operand)
 {
     const Operator* op = operand->producer;
@@ -27,7 +44,7 @@ static bool operand_maybe_tensor(const Operand* operand)
     if (op->type == "prim::Constant")
     {
         const Parameter& param = op->params.at("value");
-        if (param.type == 0 || param.type == 1 || param.type == 2 || param.type == 3 || param.type == 4 || param.type == 10)
+        if (param.type == 0 || param.type == 1 || param.type == 2 || param.type == 3 || param.type == 4 || param.type == 5 || param.type == 6 || param.type == 7 || param.type == 10)
         {
             return false;
         }
@@ -54,7 +71,43 @@ static bool operand_maybe_tensor(const Operand* operand)
 
     if (op->type == "aten::size")
     {
-        return false;
+        return op->inputs.size() == 1;
+    }
+
+    if (op->type == "Tensor.size")
+    {
+        return !op->has_param("dim");
+    }
+
+    if (op->type == "Tensor.slice")
+    {
+        // static slice
+        const size_t inputs_size = op->inputs.size();
+        if (inputs_size != 3 && inputs_size != 4 && inputs_size != 5)
+            return true;
+
+        for (size_t i = 0; i < inputs_size; i++)
+        {
+            if (op->inputs[i]->producer->type != "prim::Constant")
+                return true;
+
+            if (op->inputs[i]->producer->params.at("value").type != 2)
+                return true;
+        }
+
+        // dim=0
+        if (inputs_size == 3 && op->params.at("dim").i != 0)
+            return true;
+        if ((inputs_size == 4 || inputs_size == 5) && op->inputs[0]->producer->params.at("value").i != 1)
+            return true;
+
+        // step=1
+        if ((inputs_size == 3 || inputs_size == 4) && op->params.at("step").i != 1)
+            return true;
+        if (inputs_size == 5 && op->inputs[4]->producer->params.at("value").i != 1)
+            return true;
+
+        return !operand_maybe_shape_tensor(op->inputs[0]);
     }
 
     if (op->type == "aten::Int")
@@ -62,7 +115,7 @@ static bool operand_maybe_tensor(const Operand* operand)
         return operand_maybe_tensor(op->inputs[0]);
     }
 
-    if (op->type == "aten::to" || op->type == "aten::detach")
+    if (op->type == "Tensor.to" || op->type == "aten::detach")
     {
         return operand_maybe_tensor(op->inputs[0]);
     }
@@ -106,6 +159,7 @@ static bool operand_maybe_tensor(const Operand* operand)
             || op->type == "aten::div"
             || op->type == "aten::floor_divide"
             || op->type == "aten::fmod"
+            || op->type == "aten::logaddexp"
             || op->type == "aten::max"
             || op->type == "aten::maximum"
             || op->type == "aten::min"
@@ -124,7 +178,10 @@ static bool operand_maybe_tensor(const Operand* operand)
 
     if (op->type == "aten::add" || op->type == "aten::sub" || op->type == "aten::rsub")
     {
-        return operand_maybe_tensor(op->inputs[0]) || operand_maybe_tensor(op->inputs[1]) || operand_maybe_tensor(op->inputs[2]);
+        if (op->inputs.size() == 2)
+            return operand_maybe_tensor(op->inputs[0]) || operand_maybe_tensor(op->inputs[1]);
+        else // if (op->inputs.size() == 3)
+            return operand_maybe_tensor(op->inputs[0]) || operand_maybe_tensor(op->inputs[1]) || operand_maybe_tensor(op->inputs[2]);
     }
 
     return true;
@@ -132,9 +189,9 @@ static bool operand_maybe_tensor(const Operand* operand)
 
 static void fuse_expression(Graph& graph, Operand* operand, std::string& expr, std::vector<Operand*>& inputs, const std::set<std::string>& foldable_constants, StoreZipReader& zip, bool checksubgraph = true)
 {
-    // fprintf(stderr, "fuse_expression %s\n", operand->name.c_str());
-
     Operator* op = operand->producer;
+
+    // fprintf(stderr, "fuse_expression %s %s\n", op->type.c_str(), operand->name.c_str());
 
     if (checksubgraph && operand_maybe_tensor(operand))
     {
@@ -171,6 +228,34 @@ static void fuse_expression(Graph& graph, Operand* operand, std::string& expr, s
         else if (param.type == 4)
         {
             expr += param.s;
+        }
+        else if (param.type == 5)
+        {
+            // ints
+            expr += "[";
+            for (int i = 0; i < (int)param.ai.size(); i++)
+            {
+                char tmp[32];
+                sprintf(tmp, "%d", param.ai[i]);
+                expr += tmp;
+                if (i != (int)param.ai.size() - 1)
+                    expr += ",";
+            }
+            expr += "]";
+        }
+        else if (param.type == 6)
+        {
+            // floats
+            expr += "[";
+            for (int i = 0; i < (int)param.af.size(); i++)
+            {
+                char tmp[32];
+                sprintf(tmp, "%e", param.af[i]);
+                expr += tmp;
+                if (i != (int)param.af.size() - 1)
+                    expr += ",";
+            }
+            expr += "]";
         }
         else if (param.type == 10)
         {
@@ -475,11 +560,52 @@ static void fuse_expression(Graph& graph, Operand* operand, std::string& expr, s
     }
     else if (op->type == "aten::size")
     {
-        expr += "size(";
-        fuse_expression(graph, op->inputs[0], expr, inputs, foldable_constants, zip);
-        expr += ",";
-        fuse_expression(graph, op->inputs[1], expr, inputs, foldable_constants, zip);
-        expr += ")";
+        if (op->inputs.size() == 1)
+        {
+            fuse_expression(graph, op->inputs[0], expr, inputs, foldable_constants, zip);
+        }
+        else // if (op->inputs.size() == 2)
+        {
+            expr += "size(";
+            fuse_expression(graph, op->inputs[0], expr, inputs, foldable_constants, zip);
+            expr += ",";
+            fuse_expression(graph, op->inputs[1], expr, inputs, foldable_constants, zip);
+            expr += ")";
+        }
+    }
+    else if (op->type == "Tensor.size")
+    {
+        if (op->has_param("dim") && op->params.at("dim").type == 2)
+        {
+            const int dim = op->params.at("dim").i;
+            expr += "size(";
+            fuse_expression(graph, op->inputs[0], expr, inputs, foldable_constants, zip);
+            expr += ",";
+            expr += std::to_string(dim);
+            expr += ")";
+        }
+        else
+        {
+            fuse_expression(graph, op->inputs[0], expr, inputs, foldable_constants, zip);
+        }
+    }
+    else if (op->type == "Tensor.slice" && !operand_maybe_tensor(operand))
+    {
+        int start = op->inputs.size() == 3 ? op->inputs[1]->producer->params.at("value").i : op->inputs[2]->producer->params.at("value").i;
+        int end = op->inputs.size() == 3 ? op->inputs[2]->producer->params.at("value").i : op->inputs[3]->producer->params.at("value").i;
+
+        // onnx style shape + slice chain
+        const Operator* op_shape = op->inputs[0]->producer;
+        for (int i = start; i < end; i++)
+        {
+            expr += "size(";
+            fuse_expression(graph, op_shape->inputs[0], expr, inputs, foldable_constants, zip);
+            expr += ",";
+            expr += std::to_string(i);
+            expr += ")";
+            if (i + 1 != end)
+                expr += ",";
+        }
     }
     else if (op->type == "aten::Int")
     {
@@ -493,6 +619,15 @@ static void fuse_expression(Graph& graph, Operand* operand, std::string& expr, s
         if (noop_type_cast)
         {
             fuse_expression(graph, op->inputs[0], expr, inputs, foldable_constants, zip);
+        }
+        else if (!operand_maybe_tensor(operand))
+        {
+            std::string dtype = op->params.at("dtype").s;
+
+            // torch.xxx
+            expr += dtype + "(";
+            fuse_expression(graph, op->inputs[0], expr, inputs, foldable_constants, zip);
+            expr += ")";
         }
         else
         {
@@ -540,6 +675,7 @@ static void fuse_expression(Graph& graph, Operand* operand, std::string& expr, s
     else if (op->type == "aten::atan2"
              || op->type == "aten::floor_divide"
              || op->type == "aten::fmod"
+             || op->type == "aten::logaddexp"
              || op->type == "aten::max"
              || op->type == "aten::maximum"
              || op->type == "aten::min"
@@ -578,22 +714,30 @@ static void fuse_expression(Graph& graph, Operand* operand, std::string& expr, s
         expr += ",";
 
         std::string expr1;
-        std::string expr2;
         fuse_expression(graph, op->inputs[1], expr1, inputs, foldable_constants, zip);
-        fuse_expression(graph, op->inputs[2], expr2, inputs, foldable_constants, zip);
 
-        if (expr2 == "1")
+        if (op->inputs.size() == 2)
         {
             expr += expr1;
         }
-        else
+        else // if (op->inputs.size() == 3)
         {
-            expr += ",";
-            expr += "mul(";
-            expr += expr1;
-            expr += ",";
-            expr += expr2;
-            expr += ")";
+            std::string expr2;
+            fuse_expression(graph, op->inputs[2], expr2, inputs, foldable_constants, zip);
+
+            if (expr2 == "1")
+            {
+                expr += expr1;
+            }
+            else
+            {
+                expr += ",";
+                expr += "mul(";
+                expr += expr1;
+                expr += ",";
+                expr += expr2;
+                expr += ")";
+            }
         }
 
         expr += ")";
@@ -602,22 +746,30 @@ static void fuse_expression(Graph& graph, Operand* operand, std::string& expr, s
     {
         expr += "sub(";
         std::string expr1;
-        std::string expr2;
         fuse_expression(graph, op->inputs[1], expr1, inputs, foldable_constants, zip);
-        fuse_expression(graph, op->inputs[2], expr2, inputs, foldable_constants, zip);
 
-        if (expr2 == "1")
+        if (op->inputs.size() == 2)
         {
             expr += expr1;
         }
-        else
+        else // if (op->inputs.size() == 3)
         {
-            expr += ",";
-            expr += "mul(";
-            expr += expr1;
-            expr += ",";
-            expr += expr2;
-            expr += ")";
+            std::string expr2;
+            fuse_expression(graph, op->inputs[2], expr2, inputs, foldable_constants, zip);
+
+            if (expr2 == "1")
+            {
+                expr += expr1;
+            }
+            else
+            {
+                expr += ",";
+                expr += "mul(";
+                expr += expr1;
+                expr += ",";
+                expr += expr2;
+                expr += ")";
+            }
         }
 
         expr += ",";
@@ -708,11 +860,16 @@ void fuse_expression(Graph& graph, const std::set<std::string>& foldable_constan
             {
                 need_fuse = true;
             }
+            if (op->type == "Tensor.size")
+            {
+                need_fuse = true;
+            }
             if (op->type == "Tensor.to")
             {
                 // fuse noop type cast only
                 bool noop_to = (op->outputs[0]->type != -1) && (op->inputs[0]->type == op->outputs[0]->type);
-                need_fuse = noop_to;
+                bool is_scalar = !operand_maybe_tensor(op->outputs[0]);
+                need_fuse = noop_to || is_scalar;
             }
             if (op->type == "aten::detach" || op->type == "aten::ScalarImplicit")
             {
@@ -737,6 +894,7 @@ void fuse_expression(Graph& graph, const std::set<std::string>& foldable_constan
                     || op->type == "aten::fmod"
                     || op->type == "aten::log"
                     || op->type == "aten::log10"
+                    || op->type == "aten::logaddexp"
                     || op->type == "aten::max"
                     || op->type == "aten::maximum"
                     || op->type == "aten::min"
